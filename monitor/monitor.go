@@ -20,6 +20,7 @@ package monitor
 
 import (
 	"bufio"
+	//"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -116,7 +117,7 @@ type RuleApplication struct {
 
 // ProcessEvent consumes an event and performs the necessary monitoring actions.
 // It returns an error if there was an issue while consuming the event.
-func (m *Monitor) ProcessEvent(a term.Term) error {
+func (m *Monitor) ProcessEvent(a term.Term) (term.Term, error) {
 	log.Debugf("ProcessEvent(%s)\n", a)
 
 	updated := data.NewHashSet[*Config]()
@@ -133,7 +134,7 @@ func (m *Monitor) ProcessEvent(a term.Term) error {
 
 			next, err := handleTriggers(c, a, r, m.rules)
 			if err != nil {
-				return err
+				return nil, err
 			}
 
 			appliedTriggers = appliedTriggers.Union(next)
@@ -148,7 +149,7 @@ func (m *Monitor) ProcessEvent(a term.Term) error {
 
 			next, err := handleHints(c, a, r, m.rules)
 			if err != nil {
-				return err
+				return nil, err
 			}
 
 			if appliedTriggers.Empty() {
@@ -184,6 +185,66 @@ func (m *Monitor) ProcessEvent(a term.Term) error {
 		log.Infof("multiple configurations for event %.120s\n", a)
 	}
 
+
+	// ======================================================================
+	// ===  REPAIR EXTENSION FOR TESTING: If updated.Empty(), attempt auto-repair     ===
+	// ======================================================================
+	// if updated.Empty() {
+	// 	log.Warnf("illegal event: %.120s — attempting repair instead of failing", a)
+	
+	// 	// ----------------------------
+	// 	// (1) Build the repair target
+	// 	// ----------------------------
+	// 	keyHex := "736563726574"
+	// 	msgHex := "0a00000000000000026d6573736167652d3032"
+	
+	// 	keyBytes, _ := hex.DecodeString(keyHex)
+	// 	msgBytes, _ := hex.DecodeString(msgHex)
+	
+	// 	key := term.NewConstant(keyBytes)
+	// 	msg := term.NewConstant(msgBytes)
+	
+		
+	// 	target := term.NewFunction("hmac", []term.Term{key, msg})
+	
+	// 	// ----------------------------
+	// 	// (2) Extract known terms
+	// 	// ----------------------------
+	// 	var cfg *Config
+	// 	for _, c := range m.configs.Values() {
+	// 		cfg = c
+	// 		break
+	// 	}
+	
+	// 	missing := MissingTermsFromConfiguration(target, cfg)
+	// 	log.Warnf("Repair: missing terms: %v\n", missing)
+	
+	// 	// ----------------------------
+	// 	// (3) Resolve missing
+	// 	// ----------------------------
+	// 	resolved, err := ResolveMissingTerms(missing)
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("repair failed: %v", err)
+	// 	}
+	
+	// 	log.Warnf("Repair: resolved terms = %v\n", resolved)
+	
+	// 	// The resolved last term is ALWAYS the full function we want
+	// 	computedDigest := resolved[len(resolved)-1]
+	// 	repairedEvent := term.NewFunction("pair", []term.Term{
+	// 		target,            // full hmac(k,m)
+	// 		computedDigest,    // computed digest
+	// 	})
+		
+	// 	log.Warnf("Repair: replacing illegal event with repaired event: %v\n", repairedEvent)
+	
+	// 	// ----------------------------
+	// 	// (4) Re-run the event
+	// 	// ----------------------------
+	// 	return m.ProcessEvent(repairedEvent)
+	// }
+	
+
 	if updated.Empty() {
 		possibleEvents := m.findPossibleEvents()
 		for i, events := range possibleEvents {
@@ -193,12 +254,12 @@ func (m *Monitor) ProcessEvent(a term.Term) error {
 			}
 		}
 
-		return ErrNoApplicableRule
+		return nil, ErrNoApplicableRule
 	}
 
 	m.configs = updated
 
-	return nil
+	return a, nil
 }
 
 // findPossibleEvents returns the events that are possible in each configuration.
@@ -685,7 +746,8 @@ func (m *Monitor) ProcessEvents(events <-chan *TimedEvent, rewrite bool, pid int
 
 			m.stats.LatenciesReceived = append(m.stats.LatenciesReceived, time.Since(time.Unix(0, event.Time)))
 
-			if err := m.ProcessEvent(event.Event); err != nil {
+			consumedEvent, err := m.ProcessEvent(event.Event);
+			if err != nil {
 				log.Warnf("\nfinal configurations (%d)\n", m.configs.Size())
 				for _, c := range m.configs.Values() {
 					for _, f := range c.facts {
@@ -716,7 +778,7 @@ func (m *Monitor) ProcessEvents(events <-chan *TimedEvent, rewrite bool, pid int
 					}
 				}
 			} else {
-				consumed <- event.Event
+				consumed <- consumedEvent
 			}
 		}
 

@@ -20,22 +20,16 @@ func extractKnownFromConfig(cfg *Config) []term.Term {
 	var known []term.Term
 
 	// seen events
-	for _, t := range cfg.seen {
-		known = append(known, t)
-	}
+	known = append(known, cfg.seen...)
 
 	// state facts
 	for _, f := range cfg.facts {
-		for _, arg := range f.Args {
-			known = append(known, arg)
-		}
+		known = append(known, f.Args... )
 	}
 
 	// trace action facts
 	for _, f := range cfg.trace {
-		for _, arg := range f.Args {
-			known = append(known, arg)
-		}
+		known = append(known, f.Args...)
 	}
 
 	return known

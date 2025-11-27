@@ -363,7 +363,6 @@ func TestMissingTermsFromConfig_CryptoExample(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 7. FULL REAL CONFIGURATION TEST
 //     Target = <exp(rand(), X), Y>
 //     Uses real hex bitstrings from your ProcessEvent dump.
 // -----------------------------------------------------------------------------

@@ -80,7 +80,7 @@ func TestMonitorMultipleFrFacts(t *testing.T) {
 		term.NewFunction("pair", []term.Term{}),
 	})
 
-	err = mon.ProcessEvent(testEvent)
+	_, err = mon.ProcessEvent(testEvent)
 	if err != nil {
 		t.Fatalf("ProcessEvent failed: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestMonitorRestrictionViolation(t *testing.T) {
 		term.NewConstant("1"),
 	})
 
-	err = mon.ProcessEvent(inEvent)
+	_, err = mon.ProcessEvent(inEvent)
 	if err != nil {
 		t.Fatalf("ProcessEvent failed for in event: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestMonitorRestrictionViolation(t *testing.T) {
 		term.NewConstant("42"),
 	})
 
-	err = mon.ProcessEvent(hEvent)
+	_, err = mon.ProcessEvent(hEvent)
 	if err != nil {
 		t.Fatalf("ProcessEvent failed for h event: %v", err)
 	}
