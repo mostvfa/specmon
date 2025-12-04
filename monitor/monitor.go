@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -114,6 +115,48 @@ type RuleApplication struct {
 	config  *Config
 }
 
+
+func writeBlockEvent(hexStr string) {
+	blockEvent := map[string]any{
+		"time": time.Now().UnixMilli(),
+		"event": map[string]any{
+			"name": "pair",
+			"type": "function",
+			"args": []any{
+				map[string]any{
+					"name": "block",
+					"type": "function",
+					"args": []any{
+						map[string]any{
+							"name":  "value",
+							"type":  "constant",
+							"value": hexStr,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	encoded, err := json.Marshal(blockEvent)
+	if err != nil {
+		log.Fatalf("❌ Failed to encode block event: %v", err)
+	}
+
+	path := "~/Desktop/integrating-ea/black_list.txt"
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("❌ Failed to open blacklist file: %v", err)
+	}
+	defer f.Close()
+
+	if _, err := f.Write(append(encoded, '\n')); err != nil {
+		log.Fatalf("❌ Failed to write to blacklist: %v", err)
+	} else {
+		log.Warnf("⚠️ BLOCKED message: %s", hexStr)
+	}
+}
+
 // ProcessEvent consumes an event and performs the necessary monitoring actions.
 // It returns an error if there was an issue while consuming the event.
 func (m *Monitor) ProcessEvent(a term.Term) error {
@@ -184,18 +227,57 @@ func (m *Monitor) ProcessEvent(a term.Term) error {
 		log.Infof("multiple configurations for event %.120s\n", a)
 	}
 
+	// if updated.Empty() {
+	// 	possibleEvents := m.findPossibleEvents()
+	// 	for i, events := range possibleEvents {
+	// 		log.Errorf("allowed events in configuration %d:\n", i)
+	// 		for _, e := range events {
+	// 			log.Errorf("  %.120s\n", e)
+	// 		}
+	// 	}
+
+	// 	return ErrNoApplicableRule
+	// }
 	if updated.Empty() {
-		possibleEvents := m.findPossibleEvents()
-		for i, events := range possibleEvents {
-			log.Errorf("allowed events in configuration %d:\n", i)
-			for _, e := range events {
-				log.Errorf("  %.120s\n", e)
+		eventStr := a.String()
+		log.Errorf("ILLEGAL EVENT is sealed sender usmc %s\n", eventStr)
+
+		if strings.HasPrefix(eventStr, "<sealed_sender_encrypt_from_usmc(") {
+			log.Infof("🔐 Found sealed_sender_encrypt_from_usmc: %s", eventStr)
+			log.Errorf("ILLEGAL EVENT is sealed sender usmc %s\n", eventStr)
+
+			// Extract return value after the last comma and before '>'
+			parts := strings.Split(eventStr, "),")
+			if len(parts) == 2 {
+				ret := strings.TrimSpace(parts[1])
+				ret = strings.Trim(ret, ">")
+				ret = strings.Trim(ret, "'")
+
+				writeBlockEvent(ret)
 			}
+			return ErrNoApplicableRule
 		}
 
-		return ErrNoApplicableRule
-	}
+		if strings.HasPrefix(eventStr, "<session_cipher__message_encrypt(") {
+			log.Infof("🧨 Found session_cipher__message_encrypt: %s", eventStr)
+			log.Errorf("ILLEGAL EVENT is session cipher %s\n", eventStr)
 
+			// Extract the last argument inside the parentheses
+			start := strings.Index(eventStr, "(")
+			end := strings.LastIndex(eventStr, ")")
+			if start != -1 && end != -1 && end > start {
+				argsSection := eventStr[start+1 : end]
+				args := strings.Split(argsSection, ",")
+				lastArg := strings.TrimSpace(args[len(args)-1])
+				lastArg = strings.Trim(lastArg, "'")
+
+				writeBlockEvent(lastArg)
+			}
+			return ErrNoApplicableRule
+		}
+		return ErrNoApplicableRule
+
+	}
 	m.configs = updated
 
 	return nil
