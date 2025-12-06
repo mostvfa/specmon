@@ -74,6 +74,31 @@ type Monitor struct {
 	stats *Stats
 }
 
+func (m *Monitor) Functions() map[string]struct{} {
+	// iterate over all triggers and hints of all rules
+	// triggers/hints are typically pairs like <hmac(...), ...>, so we extract the first component
+	functions := make(map[string]struct{})
+	for _, r := range m.rules {
+		for _, rule := range r {
+			for _, t := range rule.Triggers() {
+				// Extract function name from pair's first component
+				funcName := strings.TrimSpace(splitPairFirstName(t))
+				if funcName != "" {
+					functions[funcName] = struct{}{}
+				}
+			}
+			for _, h := range rule.Hints() {
+				// Extract function name from pair's first component
+				funcName := strings.TrimSpace(splitPairFirstName(h))
+				if funcName != "" {
+					functions[funcName] = struct{}{}
+				}
+			}
+		}
+	}
+	return functions
+}
+
 func NewMonitor(rules []*rule.Rule) (*Monitor, error) {
 	if err := checkWellformedness(rules); err != nil {
 		return nil, err
@@ -185,28 +210,26 @@ func (m *Monitor) ProcessEvent(a term.Term) (term.Term, error) {
 		log.Infof("multiple configurations for event %.120s\n", a)
 	}
 
-
 	// ======================================================================
 	// ===  REPAIR EXTENSION FOR TESTING: If updated.Empty(), attempt auto-repair     ===
 	// ======================================================================
 	// if updated.Empty() {
 	// 	log.Warnf("illegal event: %.120s — attempting repair instead of failing", a)
-	
+
 	// 	// ----------------------------
 	// 	// (1) Build the repair target
 	// 	// ----------------------------
 	// 	keyHex := "736563726574"
 	// 	msgHex := "0a00000000000000026d6573736167652d3032"
-	
+
 	// 	keyBytes, _ := hex.DecodeString(keyHex)
 	// 	msgBytes, _ := hex.DecodeString(msgHex)
-	
+
 	// 	key := term.NewConstant(keyBytes)
 	// 	msg := term.NewConstant(msgBytes)
-	
-		
+
 	// 	target := term.NewFunction("hmac", []term.Term{key, msg})
-	
+
 	// 	// ----------------------------
 	// 	// (2) Extract known terms
 	// 	// ----------------------------
@@ -215,10 +238,10 @@ func (m *Monitor) ProcessEvent(a term.Term) (term.Term, error) {
 	// 		cfg = c
 	// 		break
 	// 	}
-	
+
 	// 	missing := MissingTermsFromConfiguration(target, cfg)
 	// 	log.Warnf("Repair: missing terms: %v\n", missing)
-	
+
 	// 	// ----------------------------
 	// 	// (3) Resolve missing
 	// 	// ----------------------------
@@ -226,24 +249,23 @@ func (m *Monitor) ProcessEvent(a term.Term) (term.Term, error) {
 	// 	if err != nil {
 	// 		return nil, fmt.Errorf("repair failed: %v", err)
 	// 	}
-	
+
 	// 	log.Warnf("Repair: resolved terms = %v\n", resolved)
-	
+
 	// 	// The resolved last term is ALWAYS the full function we want
 	// 	computedDigest := resolved[len(resolved)-1]
 	// 	repairedEvent := term.NewFunction("pair", []term.Term{
 	// 		target,            // full hmac(k,m)
 	// 		computedDigest,    // computed digest
 	// 	})
-		
+
 	// 	log.Warnf("Repair: replacing illegal event with repaired event: %v\n", repairedEvent)
-	
+
 	// 	// ----------------------------
 	// 	// (4) Re-run the event
 	// 	// ----------------------------
 	// 	return m.ProcessEvent(repairedEvent)
 	// }
-	
 
 	if updated.Empty() {
 		possibleEvents := m.findPossibleEvents()
@@ -254,6 +276,33 @@ func (m *Monitor) ProcessEvent(a term.Term) (term.Term, error) {
 			}
 		}
 
+		// Optionally find repair paths (can be enabled via a flag or method)
+		// Uncomment to enable automatic repair path finding:
+		/*log.Errorf("Finding repair paths for event: %.120s", a)
+		if repairPaths, err := m.FindRepairPaths(a, nil); err == nil && len(repairPaths) > 0 {
+			log.Errorf("Repair paths found for event: %.120s", a)
+		 	log.Errorf("Repair paths found:\n%s", FormatRepairPaths(repairPaths))
+		} else {
+			log.Errorf("No repair paths found for event: %.120s", a)
+		}
+		*/
+		// repairPaths, err := m.RepairPathsInContext(a, nil)
+		// if err != nil {
+		// 	log.Errorf("Error finding repair paths: %v", err)
+		// } else {
+		// 	log.Errorf("Repair paths found:\n%s", FormatRepairPaths(repairPaths))
+		// }
+
+		// Also compute detailed repair plans
+		repairPlans, err := m.RepairAndTellMeWhatToDo(a, nil)
+		if err != nil {
+			log.Errorf("Error finding repair plans: %v", err)
+		} else {
+			log.Errorf("Repair plans found:\n%s", FormatRepairResults(repairPlans))
+			// for _, plan := range repairPlans {
+			// 	log.Errorf("Repair plan: %s", plan)
+			// }
+		}
 		return nil, ErrNoApplicableRule
 	}
 
@@ -746,7 +795,7 @@ func (m *Monitor) ProcessEvents(events <-chan *TimedEvent, rewrite bool, pid int
 
 			m.stats.LatenciesReceived = append(m.stats.LatenciesReceived, time.Since(time.Unix(0, event.Time)))
 
-			consumedEvent, err := m.ProcessEvent(event.Event);
+			consumedEvent, err := m.ProcessEvent(event.Event)
 			if err != nil {
 				log.Warnf("\nfinal configurations (%d)\n", m.configs.Size())
 				for _, c := range m.configs.Values() {

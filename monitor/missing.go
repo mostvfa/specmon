@@ -24,7 +24,7 @@ func extractKnownFromConfig(cfg *Config) []term.Term {
 
 	// state facts
 	for _, f := range cfg.facts {
-		known = append(known, f.Args... )
+		known = append(known, f.Args...)
 	}
 
 	// trace action facts
