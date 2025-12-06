@@ -1,5 +1,4 @@
 // Copyright (C) 2025 CISPA Helmholtz Center for Information Security
-// Author: Kevin Morio <kevin.morio@cispa.de>
 //
 // This file is part of SpecMon.
 //
