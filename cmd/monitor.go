@@ -36,6 +36,7 @@ type MonitorConfig struct {
 	Out         string `flag:"out"          short:"o" desc:"output path"`
 	PreTrace    string `flag:"pre-trace"    short:"p" desc:"pre-trace path"`
 	Pid         int    `flag:"pid"          short:"P" desc:"PID of the monitored process to terminate"`
+	RPC         string `flag:"rpc"                desc:"start RPC server on host:port for live checks"`
 	RewriteWith string `flag:"rewrite-with" short:"R" desc:"rewrite theory (.spthy) to apply inline before monitoring"`
 }
 
@@ -86,6 +87,15 @@ func (r *MonitorConfig) RunE(cmd *cobra.Command, args []string) error {
 	m, err = monitor.NewMonitor(decompRules)
 	if err != nil {
 		return fmt.Errorf("cannot create monitor: %w", err)
+	}
+
+	var rpcServer *monitor.RPCServer
+	if r.RPC != "" {
+		rpcServer, err = m.StartRPCServer(r.RPC)
+		if err != nil {
+			return fmt.Errorf("cannot start RPC server: %w", err)
+		}
+		defer rpcServer.Close()
 	}
 
 	if r.RewriteWith != "" {

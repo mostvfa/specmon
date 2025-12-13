@@ -27,6 +27,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -72,6 +73,10 @@ type Monitor struct {
 
 	// stats includes the statistics of the monitor.
 	stats *Stats
+
+	// mu ensures that processing events via different entrypoints
+	// (streaming monitor loop and RPC server) remains serialized and safe.
+	mu sync.Mutex
 }
 
 func (m *Monitor) Functions() map[string]struct{} {
@@ -143,6 +148,15 @@ type RuleApplication struct {
 // ProcessEvent consumes an event and performs the necessary monitoring actions.
 // It returns an error if there was an issue while consuming the event.
 func (m *Monitor) ProcessEvent(a term.Term) (term.Term, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.processEventLocked(a)
+}
+
+// processEventLocked contains the original processing logic.
+// Callers must hold m.mu before invoking.
+func (m *Monitor) processEventLocked(a term.Term) (term.Term, error) {
 	log.Debugf("ProcessEvent(%s)\n", a)
 
 	updated := data.NewHashSet[*Config]()
@@ -793,10 +807,20 @@ func (m *Monitor) ProcessEvents(events <-chan *TimedEvent, rewrite bool, pid int
 				log.Fatalf("event is nil: %v", event)
 			}
 
-			m.stats.LatenciesReceived = append(m.stats.LatenciesReceived, time.Since(time.Unix(0, event.Time)))
+			var (
+				consumedEvent term.Term
+				err           error
+			)
 
-			consumedEvent, err := m.ProcessEvent(event.Event)
+			m.mu.Lock()
+
+			m.stats.LatenciesReceived = append(m.stats.LatenciesReceived, time.Since(time.Unix(0, event.Time)))
+			consumedEvent, err = m.processEventLocked(event.Event)
+			m.stats.LatenciesProcessed = append(m.stats.LatenciesProcessed, time.Since(time.Unix(0, event.Time)))
+
 			if err != nil {
+				m.mu.Unlock()
+
 				log.Warnf("\nfinal configurations (%d)\n", m.configs.Size())
 				for _, c := range m.configs.Values() {
 					for _, f := range c.facts {
@@ -807,10 +831,8 @@ func (m *Monitor) ProcessEvents(events <-chan *TimedEvent, rewrite bool, pid int
 				if err := utils.KillProcess(pid); err != nil {
 					log.Errorf("failed to kill process: %v", err)
 				}
-				log.Fatalf("error processing event: %v %s", err, event.Event)
+				log.Errorf("xxxxerror processing event: %v %s", err, event.Event)
 			}
-
-			m.stats.LatenciesProcessed = append(m.stats.LatenciesProcessed, time.Since(time.Unix(0, event.Time)))
 
 			if rewrite {
 				for _, c := range m.configs.Values() {
@@ -829,6 +851,8 @@ func (m *Monitor) ProcessEvents(events <-chan *TimedEvent, rewrite bool, pid int
 			} else {
 				consumed <- consumedEvent
 			}
+
+			m.mu.Unlock()
 		}
 
 		log.Warnf("\nfinal configurations (%d)\n", m.configs.Size())
